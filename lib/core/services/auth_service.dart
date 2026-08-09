@@ -43,23 +43,17 @@ class AuthService {
   }
 
   Future<UserCredential?> signInWithGoogle({bool rememberMe = false}) async {
-    // Open Google account picker
     final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-
-    // User cancelled
     if (googleUser == null) return null;
 
-    // Get authentication details
     final GoogleSignInAuthentication googleAuth =
         await googleUser.authentication;
 
-    // Create Firebase credential
     final credential = GoogleAuthProvider.credential(
       accessToken: googleAuth.accessToken,
       idToken: googleAuth.idToken,
     );
 
-    // Sign in to Firebase
     final userCredential = await _auth.signInWithCredential(credential);
     await setRememberMe(rememberMe);
     await updateLastActive();
@@ -103,19 +97,16 @@ class AuthService {
     } catch (_) {}
 
     try {
-      GoalCompletionService.instance.onLogout();
-    } catch (_) {}
-
-    try {
       await _googleSignIn.signOut();
     } catch (_) {}
+
     await _auth.signOut();
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_lastActiveKey);
     await prefs.remove(_rememberMeKey);
   }
 
-  /// Delete Account & All User Firestore Data (Google Play Policy Compliant)
   Future<void> deleteAccount() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -124,9 +115,14 @@ class AuthService {
     try {
       final firestore = FirebaseFirestore.instance;
       final userRef = firestore.collection('users').doc(uid);
-
-      // Delete subcollections
-      final subcollections = ['meals', 'water', 'steps', 'notifications', 'weight_logs', 'ai_scan_usage'];
+      final subcollections = [
+        'meals',
+        'water',
+        'steps',
+        'notifications',
+        'weight_logs',
+        'ai_scan_usage',
+      ];
       for (final col in subcollections) {
         final docs = await userRef.collection(col).get();
         for (final doc in docs.docs) {
@@ -151,7 +147,6 @@ class AuthService {
     if (user == null) {
       throw Exception('No authenticated user');
     }
-
     await user.verifyBeforeUpdateEmail(email);
   }
 
@@ -166,14 +161,11 @@ class AuthService {
 
   Future<bool> validateSession() async {
     final user = _auth.currentUser;
-    if (user == null) {
-      return false;
-    }
+    if (user == null) return false;
 
     final prefs = await SharedPreferences.getInstance();
     final rememberMe = prefs.getBool(_rememberMeKey) ?? false;
 
-    // If user selected not to remember session after closing app
     if (!rememberMe) {
       await logout();
       return false;
@@ -187,7 +179,7 @@ class AuthService {
 
     final lastActive = DateTime.fromMillisecondsSinceEpoch(lastActiveMillis);
     final now = DateTime.now();
-    final maxDuration = const Duration(days: 15);
+    const maxDuration = Duration(days: 15);
 
     if (now.difference(lastActive) > maxDuration) {
       await logout();
@@ -200,8 +192,11 @@ class AuthService {
 
   User? get currentUser => _auth.currentUser;
 
-  Future<String?> getIdToken() async {
-    return await _auth.currentUser?.getIdToken();
+  /// Returns the current Firebase ID token. Set [forceRefresh] to true after
+  /// an authentication failure so a stale token can be replaced before retry.
+  Future<String?> getIdToken({bool forceRefresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    return user.getIdToken(forceRefresh);
   }
 }
-
