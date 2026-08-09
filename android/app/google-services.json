@@ -12,7 +12,20 @@
           "package_name": "com.example.ai_calorie_counter"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "176029163069-3sbjl149pv6squisqjdr1tanpknlkpk9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.ai_calorie_counter",
+            "certificate_hash": "e542d7526cc47252b26e03f08d2a8860cc52e8b9"
+          }
+        },
+        {
+          "client_id": "176029163069-hr2d397i9u79qhmi6a9p0uccmugg5tqs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAYtjmhXFm20CdcCH7uVMpNxB8nIK2B1tM"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "176029163069-hr2d397i9u79qhmi6a9p0uccmugg5tqs.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "176029163069-bbrho197meq7l00mv0mqofj7vm7mvn3d.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.aiCalorieCounter"
+              }
+            }
+          ]
         }
       }
     }

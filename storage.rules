@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Food Images Uploads: Authenticated users can upload and read food images for AI analysis
+    match /food_images/{imageId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size < 10 * 1024 * 1024 // Max 10MB file size limit
+                   && request.resource.contentType.matches('image/.*'); // Image files only
+    }
+
+    // Default Fallback: Deny all unhandled storage access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

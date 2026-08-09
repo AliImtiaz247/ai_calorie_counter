@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User Profile Document (/users/{userId})
+    match /users/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false; // Profiles are deleted via account deletion endpoints
+
+      // Meal Logs Subcollection
+      match /meals/{mealId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Weight Logs Subcollections (supports weight_logs and weight)
+      match /weight_logs/{weightId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /weight/{weightId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Water Logs Subcollection
+      match /water/{waterId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // Step Logs Subcollection
+      match /steps/{stepId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+
+      // AI Scan Usage Records Subcollection
+      // Client can READ their own count, but CANNOT WRITE/MODIFY count directly.
+      // Scan usage can ONLY be updated by the secure backend using Firebase Admin SDK.
+      match /ai_scan_usage/{dateStr} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      // Notifications Subcollection
+      // Authenticated user can read, create, update, and delete their own notifications
+      match /notifications/{notificationId} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+    }
+
+    // Default Fallback: Deny all unhandled access by default (Least Privilege)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
