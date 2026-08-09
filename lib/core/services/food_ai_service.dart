@@ -28,30 +28,36 @@ class FoodAIService {
     return '$year-$month-$day';
   }
 
-  /// Get User's Daily Scan Usage (5 scans/day limit metadata)
+  /// Get the user's authoritative daily scan usage from the backend.
+  ///
+  /// The backend exposes this at /api/analyze-food/status. Do not silently
+  /// convert a server/authentication failure into "5 scans remaining", because
+  /// that makes the UI display stale usage and hides real API problems.
   Future<ScanUsage> getScanUsage() async {
-    try {
-      final res = await _apiClient.get("/api/scan-usage");
-      if (res is Map<String, dynamic>) {
-        return ScanUsage.fromJson(res);
-      }
-      return ScanUsage(limit: 5, used: 0, remaining: 5);
-    } catch (_) {
-      return ScanUsage(limit: 5, used: 0, remaining: 5);
+    final res = await _apiClient.get("/api/analyze-food/status");
+
+    if (res is Map<String, dynamic>) {
+      return ScanUsage.fromJson(res);
     }
+
+    throw ApiException(
+      statusCode: 500,
+      message: "Invalid scan usage response from server.",
+    );
   }
 
   /// Send image to backend for AI Analysis
   Future<Map<String, dynamic>> analyzeFood(File image) async {
-    // Client-side image validation (size limit: max 10MB)
     if (!await image.exists()) {
       throw Exception("Selected image file does not exist.");
     }
 
     final fileSizeInBytes = await image.length();
-    const maxSizeBytes = 10 * 1024 * 1024; // 10 MB
+    const maxSizeBytes = 10 * 1024 * 1024;
     if (fileSizeInBytes > maxSizeBytes) {
-      throw Exception("Image file size exceeds maximum limit of 10 MB. Please choose a smaller image.");
+      throw Exception(
+        "Image file size exceeds maximum limit of 10 MB. Please choose a smaller image.",
+      );
     }
 
     final activeLanguage = LanguageService.currentLanguageNotifier.value;
