@@ -250,15 +250,16 @@ class _NotificationCenterScreenState extends State<NotificationCenterScreen> {
     final earlierItems = <AppNotification>[];
 
     for (final item in _notifications) {
-      final itemDate = DateTime(
-        item.timestamp.year,
-        item.timestamp.month,
-        item.timestamp.day,
-      );
+      final localTs = item.timestamp.toLocal();
+      final itemDate = DateTime(localTs.year, localTs.month, localTs.day);
 
-      if (itemDate.isAtSameMomentAs(today)) {
+      if (itemDate.year == today.year &&
+          itemDate.month == today.month &&
+          itemDate.day == today.day) {
         todayItems.add(item);
-      } else if (itemDate.isAtSameMomentAs(yesterday)) {
+      } else if (itemDate.year == yesterday.year &&
+          itemDate.month == yesterday.month &&
+          itemDate.day == yesterday.day) {
         yesterdayItems.add(item);
       } else {
         earlierItems.add(item);

@@ -161,6 +161,7 @@ class AuthService {
 
   Future<bool> validateSession() async {
     final user = _auth.currentUser;
+<<<<<<< Updated upstream
     if (user == null) return false;
 
     final prefs = await SharedPreferences.getInstance();
@@ -186,17 +187,34 @@ class AuthService {
       return false;
     }
 
+=======
+    if (user == null) {
+      return false;
+    }
+>>>>>>> Stashed changes
     await updateLastActive();
     return true;
   }
 
   User? get currentUser => _auth.currentUser;
 
+<<<<<<< Updated upstream
   /// Returns the current Firebase ID token. Set [forceRefresh] to true after
   /// an authentication failure so a stale token can be replaced before retry.
   Future<String?> getIdToken({bool forceRefresh = false}) async {
     final user = _auth.currentUser;
     if (user == null) return null;
     return user.getIdToken(forceRefresh);
+=======
+  Future<String?> getIdToken({bool forceRefresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    try {
+      return await user.getIdToken(forceRefresh);
+    } catch (e) {
+      debugPrint("Error fetching Firebase ID token: $e");
+      return null;
+    }
+>>>>>>> Stashed changes
   }
 }

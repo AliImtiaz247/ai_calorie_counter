@@ -124,8 +124,12 @@ class NotificationService {
         _setupFirestoreListener(uid!);
       }
 
+      final initialList = await _localStorage.getNotifications();
+      _notificationsStreamController.add(initialList);
       await refreshUnreadCount();
-      debugPrint("[NotificationService] Notification Service Initialized.");
+      debugPrint("[NotificationService] Notification Service Initialized (${initialList.length} items).");
+
+      await ensureWelcomeNotification();
     } catch (e) {
       debugPrint("[NotificationService] Initialization error: $e");
     }
@@ -238,6 +242,24 @@ class NotificationService {
       await _localNotifications.cancel(_persistentTrackingNotificationId);
     } catch (e) {
       debugPrint("[NotificationService] Error canceling persistent tracking notification: $e");
+    }
+  }
+
+  /// Ensure Welcome Notification exists for new feeds
+  Future<void> ensureWelcomeNotification() async {
+    try {
+      final existing = await _localStorage.getNotifications();
+      if (existing.isEmpty) {
+        await notifyGoalReached(
+          id: 'welcome_calorix',
+          type: 'system',
+          title: '🎉 Welcome to Calorix!',
+          message: 'Track your daily calories, steps, and water intake effortlessly.',
+          category: 'system',
+        );
+      }
+    } catch (e) {
+      debugPrint("Error creating welcome notification: $e");
     }
   }
 
