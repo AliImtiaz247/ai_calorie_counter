@@ -6,6 +6,7 @@ import '../../../core/services/sync_service.dart';
 import '../models/daily_meal_summary.dart';
 import '../models/meal.dart';
 
+/// Central meal repository with in-memory caching and request de-duplication.
 class MealRepository extends ChangeNotifier {
   MealRepository._();
 
@@ -14,65 +15,52 @@ class MealRepository extends ChangeNotifier {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  final String uid = FirebaseAuth.instance.currentUser!.uid;
+  String get uid {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) throw StateError('User is signed out.');
+    return currentUid;
+  }
 
-  // ===========================================================
-  // CACHE
-  // ===========================================================
-
-  List<Meal> _cachedMeals = [];
-
+  List<Meal> _cachedMeals = <Meal>[];
   DateTime? _cachedDate;
-
   bool _loaded = false;
-
   DailyMealSummary _cachedSummary = DailyMealSummary.empty();
 
-  // ===========================================================
-  // GETTERS
-  // ===========================================================
+  // Prevent dashboard + meals/history screens from issuing the same read
+  // simultaneously during startup.
+  final Map<String, Future<List<Meal>>> _inFlightReads =
+      <String, Future<List<Meal>>>{};
 
   List<Meal> get cachedMeals => List.unmodifiable(_cachedMeals);
-
   DailyMealSummary get cachedSummary => _cachedSummary;
-
   bool get loaded => _loaded;
 
-  // ===========================================================
-  // HELPERS
-  // ===========================================================
-
   String dateToString(DateTime date) {
-    return "${date.year}-"
-        "${date.month.toString().padLeft(2, '0')}-"
-        "${date.day.toString().padLeft(2, '0')}";
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
-  DateTime startOfDay(DateTime date) {
-    return DateTime(date.year, date.month, date.day);
-  }
+  DateTime startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
 
-  DateTime endOfDay(DateTime date) {
-    return DateTime(date.year, date.month, date.day + 1);
+  DateTime endOfDay(DateTime date) => DateTime(date.year, date.month, date.day + 1);
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   void clearCache() {
-    _cachedMeals.clear();
+    _cachedMeals = <Meal>[];
     _cachedDate = null;
     _cachedSummary = DailyMealSummary.empty();
     _loaded = false;
+    _inFlightReads.clear();
+    notifyListeners();
   }
-
-  // ===========================================================
-  // SUMMARY CALCULATOR
-  // ===========================================================
 
   void _calculateSummary() {
     double calories = 0;
     double protein = 0;
     double carbs = 0;
     double fat = 0;
-
     double breakfast = 0;
     double lunch = 0;
     double dinner = 0;
@@ -85,19 +73,16 @@ class MealRepository extends ChangeNotifier {
       fat += meal.fat;
 
       switch (meal.mealType) {
-        case "Breakfast":
+        case 'Breakfast':
           breakfast += meal.calories;
           break;
-
-        case "Lunch":
+        case 'Lunch':
           lunch += meal.calories;
           break;
-
-        case "Dinner":
+        case 'Dinner':
           dinner += meal.calories;
           break;
-
-        case "Snacks":
+        case 'Snacks':
           snacks += meal.calories;
           break;
       }
@@ -114,27 +99,22 @@ class MealRepository extends ChangeNotifier {
       snacks: snacks,
     );
   }
-    // ===========================================================
-  // ADD MEAL (Optimistic Update)
-  // ===========================================================
 
   Future<void> addMeal(Meal meal) async {
-    final mealDate = meal.createdAt;
-    final isSameDateAsCached = _cachedDate != null &&
-        _cachedDate!.year == mealDate.year &&
-        _cachedDate!.month == mealDate.month &&
-        _cachedDate!.day == mealDate.day;
+    final cachedDate = _cachedDate;
 
-    if (isSameDateAsCached) {
+    if (cachedDate != null && _isSameDay(cachedDate, meal.createdAt)) {
       _cachedMeals.add(meal);
+      _calculateSummary();
+      notifyListeners();
     } else {
+      // Do not insert a meal from another day into today's cached list.
       _loaded = false;
       _cachedDate = null;
-      _cachedMeals.clear();
+      _cachedMeals = <Meal>[];
+      _calculateSummary();
+      notifyListeners();
     }
-
-    _calculateSummary();
-    notifyListeners();
 
     SyncService.instance.addPendingItem(
       id: meal.id,
@@ -144,205 +124,161 @@ class MealRepository extends ChangeNotifier {
 
     try {
       await _firestore
-          .collection("users")
+          .collection('users')
           .doc(uid)
-          .collection("meals")
+          .collection('meals')
           .doc(meal.id)
           .set(meal.toMap());
 
       SyncService.instance.removePendingItem(meal.id);
     } catch (e) {
-      debugPrint("Background Firestore sync pending for meal ${meal.id}");
+      // SyncService can retry this item. The optimistic UI remains responsive.
+      debugPrint('Background Firestore sync pending for meal ${meal.id}: $e');
     }
   }
 
-  // ===========================================================
-  // LOAD MEALS BY DATE
-  // ===========================================================
-
-  Future<List<Meal>> getMealsByDate(DateTime date, {bool forceRefresh = false}) async {
+  Future<List<Meal>> getMealsByDate(
+    DateTime date, {
+    bool forceRefresh = false,
+  }) async {
     if (!forceRefresh &&
         _loaded &&
         _cachedDate != null &&
-        _cachedDate!.year == date.year &&
-        _cachedDate!.month == date.month &&
-        _cachedDate!.day == date.day) {
+        _isSameDay(_cachedDate!, date)) {
       return _cachedMeals;
     }
 
+    final dateKey = dateToString(date);
+
+    if (!forceRefresh) {
+      final existingRequest = _inFlightReads[dateKey];
+      if (existingRequest != null) return existingRequest;
+    }
+
+    final future = _fetchMealsByDate(date);
+    _inFlightReads[dateKey] = future;
+
+    try {
+      return await future;
+    } finally {
+      if (identical(_inFlightReads[dateKey], future)) {
+        _inFlightReads.remove(dateKey);
+      }
+    }
+  }
+
+  Future<List<Meal>> _fetchMealsByDate(DateTime date) async {
     final start = startOfDay(date);
     final end = endOfDay(date);
 
     final snapshot = await _firestore
-        .collection("users")
+        .collection('users')
         .doc(uid)
-        .collection("meals")
+        .collection('meals')
         .where(
-          "createdAt",
+          'createdAt',
           isGreaterThanOrEqualTo: Timestamp.fromDate(start),
         )
         .where(
-          "createdAt",
+          'createdAt',
           isLessThan: Timestamp.fromDate(end),
         )
-        .orderBy("createdAt")
+        .orderBy('createdAt')
         .get();
 
-    _cachedMeals = snapshot.docs
+    final meals = snapshot.docs
         .map((doc) => Meal.fromMap(doc.data()))
-        .toList();
+        .toList(growable: true);
 
-    _cachedDate = DateTime(
-      date.year,
-      date.month,
-      date.day,
-    );
-
+    _cachedMeals = meals;
+    _cachedDate = DateTime(date.year, date.month, date.day);
     _loaded = true;
-
     _calculateSummary();
-
     notifyListeners();
 
     return _cachedMeals;
   }
 
-  // ===========================================================
-  // TODAY'S MEALS
-  // ===========================================================
-
-  Future<List<Meal>> getTodaysMeals({bool forceRefresh = false}) async {
-    final now = DateTime.now();
-    if (forceRefresh ||
-        _cachedDate == null ||
-        _cachedDate!.year != now.year ||
-        _cachedDate!.month != now.month ||
-        _cachedDate!.day != now.day) {
-      _loaded = false;
-    }
-    return await getMealsByDate(now, forceRefresh: forceRefresh);
+  Future<List<Meal>> getTodaysMeals({bool forceRefresh = false}) {
+    return getMealsByDate(DateTime.now(), forceRefresh: forceRefresh);
   }
 
-  // ===========================================================
-  // DAILY SUMMARY
-  // ===========================================================
-
-  Future<DailyMealSummary> getDailySummary(
-    DateTime date,
-  ) async {
+  Future<DailyMealSummary> getDailySummary(DateTime date) async {
     await getMealsByDate(date);
-
     return _cachedSummary;
   }
 
-  // ===========================================================
-  // LAST X DAYS
-  // ===========================================================
-
   Future<List<Meal>> getMealsForLastDays(int days) async {
+    if (days <= 0) return <Meal>[];
+
     final now = DateTime.now();
-
-    final start = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(Duration(days: days - 1));
-
-    final end = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).add(const Duration(days: 1));
+    final start = startOfDay(now).subtract(Duration(days: days - 1));
+    final end = endOfDay(now);
 
     final snapshot = await _firestore
-        .collection("users")
+        .collection('users')
         .doc(uid)
-        .collection("meals")
+        .collection('meals')
         .where(
-          "createdAt",
+          'createdAt',
           isGreaterThanOrEqualTo: Timestamp.fromDate(start),
         )
         .where(
-          "createdAt",
+          'createdAt',
           isLessThan: Timestamp.fromDate(end),
         )
-        .orderBy("createdAt", descending: true)
+        .orderBy('createdAt', descending: true)
         .get();
 
     return snapshot.docs
         .map((doc) => Meal.fromMap(doc.data()))
         .toList();
   }
-    // ===========================================================
-  // DELETE MEAL (Optimistic Update)
-  // ===========================================================
 
   Future<void> deleteMeal(String mealId) async {
-    final index = _cachedMeals.indexWhere((m) => m.id == mealId);
-
+    final index = _cachedMeals.indexWhere((meal) => meal.id == mealId);
     if (index == -1) return;
 
     final removedMeal = _cachedMeals[index];
-
-    // Remove instantly from UI
     _cachedMeals.removeAt(index);
-
     _calculateSummary();
-
     notifyListeners();
 
     try {
       await _firestore
-          .collection("users")
+          .collection('users')
           .doc(uid)
-          .collection("meals")
+          .collection('meals')
           .doc(mealId)
           .delete();
     } catch (e) {
-      // Rollback if Firestore fails
       _cachedMeals.insert(index, removedMeal);
-
       _calculateSummary();
-
       notifyListeners();
-
       rethrow;
     }
   }
 
-  // ===========================================================
-  // UPDATE MEAL (Optimistic Update)
-  // ===========================================================
-
   Future<void> updateMeal(Meal meal) async {
-    final index = _cachedMeals.indexWhere((m) => m.id == meal.id);
-
+    final index = _cachedMeals.indexWhere((item) => item.id == meal.id);
     if (index == -1) return;
 
     final oldMeal = _cachedMeals[index];
-
-    // Update instantly
     _cachedMeals[index] = meal;
-
     _calculateSummary();
-
     notifyListeners();
 
     try {
       await _firestore
-          .collection("users")
+          .collection('users')
           .doc(uid)
-          .collection("meals")
+          .collection('meals')
           .doc(meal.id)
           .update(meal.toMap());
     } catch (e) {
-      // Rollback
       _cachedMeals[index] = oldMeal;
-
       _calculateSummary();
-
       notifyListeners();
-
       rethrow;
     }
   }
