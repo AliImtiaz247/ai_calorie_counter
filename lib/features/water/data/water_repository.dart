@@ -128,30 +128,38 @@ class WaterRepository extends ChangeNotifier {
 
     final docRef = _waterDocForDate(targetDate);
     final existingDoc = await docRef.get();
-    final currentGoal = existingDoc.exists ? (existingDoc.data()?["goal"] ?? 3000) : 3000;
+    int currentGoal = 3000;
+    int currentConsumed = 0;
+
+    if (existingDoc.exists) {
+      final data = existingDoc.data();
+      currentGoal = (data?["goal"] as num?)?.toInt() ?? 3000;
+      currentConsumed = (data?["consumed"] as num?)?.toInt() ?? 0;
+    }
+
+    final newConsumed = currentConsumed + amount;
 
     await docRef.set(
       {
         "date": dateKey,
         "goal": currentGoal,
+        "consumed": newConsumed,
+        "updatedAt": Timestamp.now(),
       },
       SetOptions(merge: true),
     );
 
-    await docRef.update({
-      "consumed": FieldValue.increment(amount),
-      "updatedAt": Timestamp.now(),
-    });
+    final updatedWater = Water(
+      date: dateKey,
+      goal: currentGoal,
+      consumed: newConsumed,
+    );
 
-    if (dateKey == today && _cachedWater != null) {
-      _cachedWater = Water(
-        date: _cachedWater!.date,
-        goal: _cachedWater!.goal,
-        consumed: _cachedWater!.consumed + amount,
-      );
-      GoalCompletionService.instance.checkWaterGoal(
-        consumedWater: _cachedWater!.consumed,
-        waterGoal: _cachedWater!.goal,
+    if (dateKey == today) {
+      _cachedWater = updatedWater;
+      await GoalCompletionService.instance.checkWaterGoal(
+        consumedWater: newConsumed,
+        waterGoal: currentGoal,
         date: targetDate,
       );
     }
@@ -176,24 +184,34 @@ class WaterRepository extends ChangeNotifier {
     if (uid == null) return;
 
     final docRef = _waterDocForDate(targetDate);
+    final existingDoc = await docRef.get();
+    int currentGoal = 3000;
+    if (existingDoc.exists) {
+      final data = existingDoc.data();
+      currentGoal = (data?["goal"] as num?)?.toInt() ?? 3000;
+    }
+
     await docRef.set(
       {
         "date": dateKey,
         "consumed": consumed,
+        "goal": currentGoal,
         "updatedAt": Timestamp.now(),
       },
       SetOptions(merge: true),
     );
 
-    if (dateKey == today && _cachedWater != null) {
-      _cachedWater = Water(
-        date: _cachedWater!.date,
-        goal: _cachedWater!.goal,
-        consumed: consumed,
-      );
-      GoalCompletionService.instance.checkWaterGoal(
-        consumedWater: _cachedWater!.consumed,
-        waterGoal: _cachedWater!.goal,
+    final updatedWater = Water(
+      date: dateKey,
+      goal: currentGoal,
+      consumed: consumed,
+    );
+
+    if (dateKey == today) {
+      _cachedWater = updatedWater;
+      await GoalCompletionService.instance.checkWaterGoal(
+        consumedWater: consumed,
+        waterGoal: currentGoal,
         date: targetDate,
       );
     }
@@ -206,24 +224,34 @@ class WaterRepository extends ChangeNotifier {
     if (uid == null) return;
 
     final docRef = _waterDocForDate(targetDate);
+    final existingDoc = await docRef.get();
+    int currentConsumed = 0;
+    if (existingDoc.exists) {
+      final data = existingDoc.data();
+      currentConsumed = (data?["consumed"] as num?)?.toInt() ?? 0;
+    }
+
     await docRef.set(
       {
         "date": dateKey,
         "goal": goal,
+        "consumed": currentConsumed,
         "updatedAt": Timestamp.now(),
       },
       SetOptions(merge: true),
     );
 
-    if (dateKey == today && _cachedWater != null) {
-      _cachedWater = Water(
-        date: _cachedWater!.date,
-        goal: goal,
-        consumed: _cachedWater!.consumed,
-      );
-      GoalCompletionService.instance.checkWaterGoal(
-        consumedWater: _cachedWater!.consumed,
-        waterGoal: _cachedWater!.goal,
+    final updatedWater = Water(
+      date: dateKey,
+      goal: goal,
+      consumed: currentConsumed,
+    );
+
+    if (dateKey == today) {
+      _cachedWater = updatedWater;
+      await GoalCompletionService.instance.checkWaterGoal(
+        consumedWater: currentConsumed,
+        waterGoal: goal,
         date: targetDate,
       );
     }

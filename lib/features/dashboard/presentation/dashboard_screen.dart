@@ -151,13 +151,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {}
   }
 
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return LanguageService.tr("Good morning");
-    if (hour < 17) return LanguageService.tr("Good afternoon");
-    return LanguageService.tr("Good evening");
-  }
-
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String>(
@@ -469,37 +462,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildHeaderRow(
       UserProfile profile, String firstName, bool isDark, Color primaryColor) {
+    final fullName = profile.name.trim().isNotEmpty ? profile.name.trim() : firstName;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  "${_getGreeting()}, $firstName",
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                    letterSpacing: -0.5,
-                  ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                LanguageService.tr("Welcome back,"),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white60 : Colors.grey.shade600,
                 ),
-                const SizedBox(width: 6),
-                const Text("👋", style: TextStyle(fontSize: 22)),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              LanguageService.tr("Let's make today count."),
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white60 : Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
               ),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                fullName,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  letterSpacing: -0.5,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ],
+          ),
         ),
         Row(
           children: [
@@ -560,12 +554,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
             ),
             const SizedBox(width: 10),
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: primaryColor.withValues(alpha: 0.15),
-              foregroundImage: profile.hasCustomAvatar
-                  ? NetworkImage(profile.avatarUrl!) as ImageProvider
-                  : AssetImage(profile.defaultAvatarAsset) as ImageProvider,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: primaryColor.withAlpha((0.15 * 255).round()),
+                  foregroundImage: profile.hasCustomAvatar
+                      ? NetworkImage(profile.avatarUrl!) as ImageProvider
+                      : AssetImage(profile.defaultAvatarAsset) as ImageProvider,
+                ),
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22C55E),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF6F9F7),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

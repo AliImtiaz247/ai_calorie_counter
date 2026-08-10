@@ -10,6 +10,11 @@ import '../../features/notifications/presentation/notification_center_screen.dar
 import '../../features/notifications/services/notification_local_storage.dart';
 import 'connectivity_service.dart';
 
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse notificationResponse) {
+  debugPrint('[NotificationService] Background notification tap received: ${notificationResponse.payload}');
+}
+
 class NotificationService {
   NotificationService._();
 
@@ -66,6 +71,7 @@ class NotificationService {
             _handleNotificationTapPayload(payload);
           }
         },
+        onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
       );
 
       // Create Android Notification Channels
@@ -135,10 +141,20 @@ class NotificationService {
     }
   }
 
-  void _handleNotificationTapPayload(String notificationId) async {
+  void _handleNotificationTapPayload(String payload) async {
     try {
-      debugPrint("[NotificationService] Processing tap for notification $notificationId");
-      await markAsRead(notificationId);
+      debugPrint("[NotificationService] Processing tap for notification payload: $payload");
+      String notifId = payload;
+
+      if (payload.trim().startsWith('{') && payload.trim().endsWith('}')) {
+        try {
+          final notif = AppNotification.fromJson(payload);
+          await _localStorage.saveNotification(notif);
+          notifId = notif.id;
+        } catch (_) {}
+      }
+
+      await markAsRead(notifId);
 
       final navState = navigatorKey?.currentState;
       if (navState != null) {
@@ -414,6 +430,98 @@ class NotificationService {
     await _localStorage.clearAll();
     _notificationsStreamController.add([]);
     await refreshUnreadCount();
+  }
+
+  /// Delete a single notification locally and in cloud
+  Future<void> deleteNotification(String id) async {
+    await _localStorage.deleteNotification(id);
+    if (uid != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('notifications')
+            .doc(id)
+            .delete();
+      } catch (e) {
+        debugPrint("Error deleting cloud notification: $e");
+      }
+    }
+    final updatedList = await _localStorage.getNotifications();
+    _notificationsStreamController.add(updatedList);
+    await refreshUnreadCount();
+  }
+
+  /// Send a Test Notification to verify system & in-app inbox behavior
+  Future<void> sendTestNotification() async {
+    final now = DateTime.now();
+    final testId = 'test_notif_${now.millisecondsSinceEpoch}';
+
+    await notifyGoalReached(
+      id: testId,
+      type: 'system',
+      title: '🔔 Calorix Notification Test',
+      message: 'This is a test notification! It will appear in your notification screen like YouTube.',
+      category: 'system',
+    );
+  }
+
+  static const int _waterReminderNotifId = 9001;
+  static const int _mealReminderNotifId = 9002;
+
+  /// Schedule Daily Hydration & Meal Reminders
+  Future<void> scheduleDailyReminders() async {
+    try {
+      if (!_initialized) await init();
+
+      const androidDetails = AndroidNotificationDetails(
+        _defaultChannelId,
+        'Calorix Notifications',
+        channelDescription: 'Goal-completion and health updates from Calorix',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: 'ic_notification',
+        color: Color(0xFF22C55E),
+      );
+
+      const details = NotificationDetails(
+        android: androidDetails,
+        iOS: DarwinNotificationDetails(),
+      );
+
+      await _localNotifications.periodicallyShow(
+        _waterReminderNotifId,
+        '💧 Stay Hydrated!',
+        'Don\'t forget to log your water intake today to reach your hydration goal.',
+        RepeatInterval.daily,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+
+      await _localNotifications.periodicallyShow(
+        _mealReminderNotifId,
+        '🥗 Log Your Meal',
+        'Keep track of your calories and macros by logging your latest meal in Calorix.',
+        RepeatInterval.daily,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+
+      debugPrint("[NotificationService] Daily reminders scheduled successfully.");
+    } catch (e) {
+      debugPrint("[NotificationService] Error scheduling daily reminders: $e");
+    }
+  }
+
+  /// Cancel Daily Reminders when disabled in Settings
+  Future<void> cancelDailyReminders() async {
+    try {
+      await _localNotifications.cancel(_waterReminderNotifId);
+      await _localNotifications.cancel(_mealReminderNotifId);
+      debugPrint("[NotificationService] Daily reminders canceled.");
+    } catch (e) {
+      debugPrint("[NotificationService] Error canceling daily reminders: $e");
+    }
   }
 
   /// Background Cloud Firestore Sync for Notifications

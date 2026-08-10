@@ -141,4 +141,15 @@ class AppNotification {
 
   factory AppNotification.fromJson(String source) =>
       AppNotification.fromMap(json.decode(source));
+
+  String get timeAgo {
+    final now = DateTime.now();
+    final diff = now.difference(timestamp);
+
+    if (diff.inSeconds < 45) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
+  }
 }

@@ -103,4 +103,17 @@ class NotificationLocalStorage {
     final list = await getNotifications();
     return list.where((n) => !n.synced).toList();
   }
+
+  /// Delete a single notification locally
+  Future<void> deleteNotification(String notificationId) async {
+    try {
+      final list = await getNotifications();
+      list.removeWhere((n) => n.id == notificationId);
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = list.map((n) => n.toJson()).toList();
+      await prefs.setStringList(_keyNotificationsList, encoded);
+    } catch (e) {
+      debugPrint("NotificationLocalStorage: Error deleting notification: $e");
+    }
+  }
 }

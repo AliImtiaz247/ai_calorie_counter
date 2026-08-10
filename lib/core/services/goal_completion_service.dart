@@ -66,6 +66,11 @@ class GoalCompletionService {
   }) async {
     if (goal <= 0 || steps < goal) return;
 
+    final prefs = await SharedPreferences.getInstance();
+    final goalAlertsEnabled = prefs.getBool('settings_goal_alert') ?? true;
+    final stepNotifEnabled = prefs.getBool('settings_step_goal_notif') ?? true;
+    if (!goalAlertsEnabled || !stepNotifEnabled) return;
+
     final dateStr = _formatDateKey(date ?? DateTime.now());
     final key = 'goal_step_${dateStr}_$goal';
 
@@ -97,6 +102,11 @@ class GoalCompletionService {
     DateTime? date,
   }) async {
     if (calorieGoal <= 0 || consumedCalories < calorieGoal) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final goalAlertsEnabled = prefs.getBool('settings_goal_alert') ?? true;
+    final calorieNotifEnabled = prefs.getBool('settings_calorie_goal_notif') ?? true;
+    if (!goalAlertsEnabled || !calorieNotifEnabled) return;
 
     final dateStr = _formatDateKey(date ?? DateTime.now());
     final roundedGoal = calorieGoal.round();
@@ -132,6 +142,11 @@ class GoalCompletionService {
   }) async {
     if (waterGoal <= 0 || consumedWater < waterGoal) return;
 
+    final prefs = await SharedPreferences.getInstance();
+    final goalAlertsEnabled = prefs.getBool('settings_goal_alert') ?? true;
+    final waterNotifEnabled = prefs.getBool('settings_water_goal_notif') ?? true;
+    if (!goalAlertsEnabled || !waterNotifEnabled) return;
+
     final dateStr = _formatDateKey(date ?? DateTime.now());
     final key = 'goal_water_${dateStr}_$waterGoal';
 
@@ -163,6 +178,10 @@ class GoalCompletionService {
     String? userId,
   }) async {
     if (currentWeight <= 0 || targetWeight <= 0) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final goalAlertsEnabled = prefs.getBool('settings_goal_alert') ?? true;
+    if (!goalAlertsEnabled) return;
 
     // Check if current weight reached target weight (within 0.2kg margin)
     final diff = (currentWeight - targetWeight).abs();

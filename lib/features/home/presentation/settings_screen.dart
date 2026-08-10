@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../app/theme_service.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/language_service.dart';
+import '../../../core/services/notification_service.dart';
 import '../../auth/presentation/login_screen.dart';
 
 import '../../../core/utils/responsive.dart';
@@ -65,6 +66,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       if (key == _dailyReminderKey) {
         _dailyReminder = value;
+        if (value) {
+          NotificationService.instance.scheduleDailyReminders();
+        } else {
+          NotificationService.instance.cancelDailyReminders();
+        }
       } else if (key == _goalAlertKey) {
         _goalAlert = value;
       } else if (key == _bgTrackingKey) {
@@ -486,6 +492,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (value) => _updatePreference(_calorieGoalNotifKey, value),
                   activeThumbColor: colorScheme.primary,
                   activeTrackColor: colorScheme.primary.withAlpha(80),
+                ),
+                const Divider(height: 0),
+                ListTile(
+                  leading: Icon(Icons.notifications_active_outlined, color: colorScheme.primary),
+                  title: Text(LanguageService.tr('Send Test Notification')),
+                  subtitle: Text(LanguageService.tr('Test receiving a notification in screen & shade')),
+                  trailing: const Icon(Icons.send_rounded, size: 18),
+                  onTap: () async {
+                    await NotificationService.instance.sendTestNotification();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(LanguageService.tr('Test notification sent! Check your shade & notification screen.')),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
