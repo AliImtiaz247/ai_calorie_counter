@@ -49,9 +49,6 @@ class AIFoodResult {
       return double.tryParse(value.toString()) ?? 0.0;
     }
 
-    // The backend now returns scan metadata alongside the AI result:
-    // remainingScans, dailyLimit, scansToday, usage and quota.
-    // Accept all supported shapes so the 4-scan counter stays authoritative.
     ScanUsage? usage;
 
     if (json['scanUsage'] is Map) {
@@ -64,6 +61,11 @@ class AIFoodResult {
         json.containsKey('usage')) {
       usage = ScanUsage.fromJson(json);
     }
+
+    final healthyScoreValue = json['healthyScore'];
+    final healthyScore = healthyScoreValue is num
+        ? healthyScoreValue.toInt()
+        : int.tryParse(healthyScoreValue?.toString() ?? '') ?? 80;
 
     return AIFoodResult(
       foodName: food['foodName']?.toString() ??
@@ -82,7 +84,7 @@ class AIFoodResult {
       ),
       servingSize: food['servingSize']?.toString() ??
           '${food['estimatedWeight'] ?? 100} g',
-      healthyScore: numToDouble(json['healthyScore']).toInt(),
+      healthyScore: healthyScore,
       scanUsage: usage,
     );
   }
