@@ -2,95 +2,111 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ------------------------------------------------------------
-    // Authentication helpers
-    // ------------------------------------------------------------
-    function isAuthenticated() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
-    // ------------------------------------------------------------
-    // User profile
-    // ------------------------------------------------------------
-    // Users may read/create/update only their own profile.
-    // The UID is immutable and must always match the document path.
-    // createdAt is immutable after the first write.
-    match /users/{userId} {
-      allow read: if isOwner(userId);
+    function validProfileCreate(uid) {
+      return isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasAll([
+          'uid', 'name', 'email', 'age', 'height',
+          'currentWeight', 'targetWeight', 'gender',
+          'activityLevel', 'goal'
+        ])
+        && request.resource.data.age is int
+        && request.resource.data.age >= 1
+        && request.resource.data.age <= 120
+        && request.resource.data.height is number
+        && request.resource.data.height > 0
+        && request.resource.data.height <= 300
+        && request.resource.data.currentWeight is number
+        && request.resource.data.currentWeight > 0
+        && request.resource.data.currentWeight <= 500
+        && request.resource.data.targetWeight is number
+        && request.resource.data.targetWeight > 0
+        && request.resource.data.targetWeight <= 500;
+    }
 
-      allow create: if isOwner(userId)
-        && request.resource.data.uid == userId;
-
-      allow update: if isOwner(userId)
+    function validProfileUpdate(uid) {
+      return isOwner(uid)
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.uid == userId
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.age is int
+        && request.resource.data.age >= 1
+        && request.resource.data.age <= 120
+        && request.resource.data.height is number
+        && request.resource.data.height > 0
+        && request.resource.data.height <= 300
+        && request.resource.data.currentWeight is number
+        && request.resource.data.currentWeight > 0
+        && request.resource.data.currentWeight <= 500
+        && request.resource.data.targetWeight is number
+        && request.resource.data.targetWeight > 0
+        && request.resource.data.targetWeight <= 500;
+    }
 
-      // Account deletion should be handled by the authenticated account
-      // deletion flow rather than allowing arbitrary client-side deletion.
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if validProfileCreate(uid);
+      allow update: if validProfileUpdate(uid);
       allow delete: if false;
 
-      // ----------------------------------------------------------
-      // Meals
-      // ----------------------------------------------------------
       match /meals/{mealId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(uid);
       }
 
-      // ----------------------------------------------------------
-      // Weight logs
-      // ----------------------------------------------------------
+      match /water/{waterId} {
+        allow read, create, update: if isOwner(uid);
+        allow delete: if false;
+      }
+
       match /weight_logs/{weightId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(uid);
       }
 
       match /weight/{weightId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(uid);
       }
 
-      // ----------------------------------------------------------
-      // Water
-      // ----------------------------------------------------------
-      match /water/{waterId} {
-        allow read, create, update, delete: if isOwner(userId);
-      }
-
-      // ----------------------------------------------------------
-      // Steps
-      // ----------------------------------------------------------
       match /steps/{stepId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read, create, update, delete: if isOwner(uid);
       }
 
-      // ----------------------------------------------------------
-      // AI scan usage
-      // ----------------------------------------------------------
-      // IMPORTANT:
-      // The Flutter client can read its usage so the UI can display the
-      // remaining scans, but it can NEVER create/update/delete usage.
-      // The backend uses Firebase Admin SDK, which bypasses Firestore
-      // security rules after verifying the user's Firebase ID token.
-      match /ai_scan_usage/{dateStr} {
-        allow read: if isOwner(userId);
+      // AI scan history and quota counters are server-controlled.
+      match /scans/{scanId} {
+        allow read: if isOwner(uid);
         allow create, update, delete: if false;
       }
 
-      // ----------------------------------------------------------
-      // Notifications
-      // ----------------------------------------------------------
+      match /ai_scan_usage/{dateId} {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /progress/{dateId} {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
       match /notifications/{notificationId} {
-        allow read, create, update, delete: if isOwner(userId);
+        allow read: if isOwner(uid);
+        allow create, delete: if false;
+        allow update: if isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['isRead', 'readAt']);
       }
     }
 
-    // --------------------------------------------------------------
-    // Deny everything that has not been explicitly allowed above.
-    // --------------------------------------------------------------
+    // Backend-only daily scan limit records.
+    match /scan_limits/{limitId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
