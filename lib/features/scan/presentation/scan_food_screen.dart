@@ -104,7 +104,7 @@ class _ScanFoodScreenState extends State<ScanFoodScreen> {
         SnackBar(
           content: Text(
             LanguageService.tr(
-              "Daily scan limit reached (5/5). Scans will reset at 12:00 AM.",
+              "Daily scan limit reached. Scans will reset at 12:00 AM.",
             ),
           ),
           backgroundColor: Colors.redAccent,
@@ -413,7 +413,7 @@ class _ScanFoodScreenState extends State<ScanFoodScreen> {
       );
     }
 
-    final usage = _scanUsage ?? ScanUsage(limit: 5, used: 0, remaining: 5);
+    final usage = _scanUsage ?? ScanUsage(limit: 4, used: 0, remaining: 4);
     final isLimitReached = usage.remaining <= 0;
 
     final primaryColor = isLimitReached ? const Color(0xFFEF4444) : const Color(0xFF22C55E);
@@ -506,7 +506,7 @@ class _ScanFoodScreenState extends State<ScanFoodScreen> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    LanguageService.tr("Daily 5-scan limit reached. Resets at 12:00 AM local time."),
+                    LanguageService.tr("Daily scan limit reached. Resets at 12:00 AM local time."),
                     style: const TextStyle(fontSize: 12, color: Color(0xFFEF4444), fontWeight: FontWeight.w600),
                   ),
                 ),
