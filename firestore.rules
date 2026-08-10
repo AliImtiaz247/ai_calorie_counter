@@ -1,8 +1,11 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // ------------------------------------------------------------
+    // Authentication helpers
+    // ------------------------------------------------------------
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -11,50 +14,83 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // User Profile Document (/users/{userId})
+    // ------------------------------------------------------------
+    // User profile
+    // ------------------------------------------------------------
+    // Users may read/create/update only their own profile.
+    // The UID is immutable and must always match the document path.
+    // createdAt is immutable after the first write.
     match /users/{userId} {
-      allow read, create, update: if isOwner(userId);
-      allow delete: if false; // Profiles are deleted via account deletion endpoints
+      allow read: if isOwner(userId);
 
-      // Meal Logs Subcollection
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId;
+
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.uid == userId
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      // Account deletion should be handled by the authenticated account
+      // deletion flow rather than allowing arbitrary client-side deletion.
+      allow delete: if false;
+
+      // ----------------------------------------------------------
+      // Meals
+      // ----------------------------------------------------------
       match /meals/{mealId} {
         allow read, create, update, delete: if isOwner(userId);
       }
 
-      // Weight Logs Subcollections (supports weight_logs and weight)
+      // ----------------------------------------------------------
+      // Weight logs
+      // ----------------------------------------------------------
       match /weight_logs/{weightId} {
         allow read, create, update, delete: if isOwner(userId);
       }
+
       match /weight/{weightId} {
         allow read, create, update, delete: if isOwner(userId);
       }
 
-      // Water Logs Subcollection
+      // ----------------------------------------------------------
+      // Water
+      // ----------------------------------------------------------
       match /water/{waterId} {
         allow read, create, update, delete: if isOwner(userId);
       }
 
-      // Step Logs Subcollection
+      // ----------------------------------------------------------
+      // Steps
+      // ----------------------------------------------------------
       match /steps/{stepId} {
         allow read, create, update, delete: if isOwner(userId);
       }
 
-      // AI Scan Usage Records Subcollection
-      // Client can READ their own count, but CANNOT WRITE/MODIFY count directly.
-      // Scan usage can ONLY be updated by the secure backend using Firebase Admin SDK.
+      // ----------------------------------------------------------
+      // AI scan usage
+      // ----------------------------------------------------------
+      // IMPORTANT:
+      // The Flutter client can read its usage so the UI can display the
+      // remaining scans, but it can NEVER create/update/delete usage.
+      // The backend uses Firebase Admin SDK, which bypasses Firestore
+      // security rules after verifying the user's Firebase ID token.
       match /ai_scan_usage/{dateStr} {
         allow read: if isOwner(userId);
-        allow write: if false;
+        allow create, update, delete: if false;
       }
 
-      // Notifications Subcollection
-      // Authenticated user can read, create, update, and delete their own notifications
+      // ----------------------------------------------------------
+      // Notifications
+      // ----------------------------------------------------------
       match /notifications/{notificationId} {
         allow read, create, update, delete: if isOwner(userId);
       }
     }
 
-    // Default Fallback: Deny all unhandled access by default (Least Privilege)
+    // --------------------------------------------------------------
+    // Deny everything that has not been explicitly allowed above.
+    // --------------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
     }
