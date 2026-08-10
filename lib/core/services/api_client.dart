@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
 import '../models/scan_usage.dart';
 import 'api_service.dart';
 import 'auth_service.dart';
@@ -12,8 +13,15 @@ import 'food_ai_service.dart';
 class ApiException implements Exception {
   final int statusCode;
   final String message;
+  final String? code;
+  final bool retryable;
 
-  ApiException({required this.statusCode, required this.message});
+  ApiException({
+    required this.statusCode,
+    required this.message,
+    this.code,
+    this.retryable = false,
+  });
 
   @override
   String toString() => message;
@@ -40,46 +48,75 @@ class ApiClient {
     bool forceRefresh = false,
   }) async {
     final idToken = await _authService.getIdToken(forceRefresh: forceRefresh);
+
     final headers = <String, String>{
-      "Content-Type": "application/json",
-      "x-user-date": _getFormattedLocalDate(),
+      'Content-Type': 'application/json',
+      'x-user-date': _getFormattedLocalDate(),
     };
+
     if (idToken != null && idToken.isNotEmpty) {
-      headers["Authorization"] = "Bearer $idToken";
+      headers['Authorization'] = 'Bearer $idToken';
     }
+
     if (extraHeaders != null) {
       headers.addAll(extraHeaders);
     }
+
     return headers;
   }
 
-  /// Centralized GET Request Handler with single 401 token-refresh retry
-  Future<dynamic> get(String path, {Duration timeout = const Duration(seconds: 15)}) async {
-    final uri = Uri.parse("${ApiService.baseUrl}$path");
-    var headers = await _getHeaders(forceRefresh: false);
+  /// Centralized GET handler with exactly one Firebase token refresh retry.
+  Future<dynamic> get(
+    String path, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final uri = Uri.parse('${ApiService.baseUrl}$path');
+    var headers = await _getHeaders();
 
     try {
       var response = await http.get(uri, headers: headers).timeout(timeout);
 
-      // Single retry attempt on 401 by force-refreshing Firebase ID token
       if (response.statusCode == 401 && _authService.currentUser != null) {
-        debugPrint("[ApiClient] 401 received on GET $path. Force-refreshing Firebase ID token and retrying...");
+        debugPrint(
+          '[ApiClient] 401 on GET $path. Refreshing Firebase ID token once.',
+        );
         headers = await _getHeaders(forceRefresh: true);
         response = await http.get(uri, headers: headers).timeout(timeout);
       }
 
       return _processResponse(response);
     } on TimeoutException {
-      throw ApiException(statusCode: 408, message: "Network request timed out. Please try again.");
+      throw ApiException(
+        statusCode: 408,
+        message: 'Network request timed out. Please try again.',
+        retryable: true,
+      );
     } on SocketException {
-      throw ApiException(statusCode: 503, message: "Unable to connect to server. Check your internet connection.");
+      throw ApiException(
+        statusCode: 503,
+        message: 'Unable to connect to server. Check your internet connection.',
+        retryable: true,
+      );
     } catch (e) {
-      if (e is ApiException || e is ScanLimitException) rethrow;
-      throw ApiException(statusCode: 500, message: "An unexpected error occurred.");
+      if (e is ApiException ||
+          e is ScanLimitException ||
+          e is ScanInProgressException ||
+          e is AiQuotaTemporarilyExhaustedException) {
+        rethrow;
+      }
+
+      throw ApiException(
+        statusCode: 500,
+        message: 'An unexpected error occurred.',
+      );
     }
   }
 
-  /// Centralized Multipart POST Request Handler (Food AI Analysis) with 401 token-refresh retry
+  /// Multipart food-analysis request.
+  ///
+  /// There is deliberately no automatic retry for 429/503 AI responses here.
+  /// Gemini quota errors must not cause repeated paid/free-tier requests.
+  /// The backend owns transient Gemini retry/backoff and quota monitoring.
   Future<dynamic> multipartPost({
     required String path,
     required File file,
@@ -87,113 +124,191 @@ class ApiClient {
     Map<String, String>? fields,
     Duration timeout = const Duration(seconds: 90),
   }) async {
-    final uri = Uri.parse("${ApiService.baseUrl}$path");
-    var headers = await _getHeaders(forceRefresh: false);
+    final uri = Uri.parse('${ApiService.baseUrl}$path');
+    var headers = await _getHeaders();
 
-    Future<http.Response> sendRequest(Map<String, String> hdrs) async {
-      final request = http.MultipartRequest("POST", uri);
-      request.headers.addAll(hdrs);
+    Future<http.Response> sendRequest(Map<String, String> requestHeaders) async {
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(requestHeaders);
 
       if (fields != null) {
         request.fields.addAll(fields);
       }
 
-      request.files.add(await http.MultipartFile.fromPath(fileFieldName, file.path));
+      request.files.add(
+        await http.MultipartFile.fromPath(fileFieldName, file.path),
+      );
 
       final streamedResponse = await request.send().timeout(timeout);
-      return await http.Response.fromStream(streamedResponse);
+      return http.Response.fromStream(streamedResponse);
     }
 
     try {
       var response = await sendRequest(headers);
 
-      // Single retry attempt on 401 by force-refreshing Firebase ID token
+      // Only authentication gets an automatic retry. Do not retry AI quota,
+      // rate-limit, conflict, or server responses from the scan endpoint.
       if (response.statusCode == 401 && _authService.currentUser != null) {
-        debugPrint("[ApiClient] 401 received on POST $path. Force-refreshing Firebase ID token and retrying...");
+        debugPrint(
+          '[ApiClient] 401 on POST $path. Refreshing Firebase ID token once.',
+        );
         headers = await _getHeaders(forceRefresh: true);
         response = await sendRequest(headers);
       }
 
       return _processResponse(response);
     } on TimeoutException {
-      throw ApiException(statusCode: 408, message: "Image processing timed out. Please try again.");
+      throw ApiException(
+        statusCode: 408,
+        message: 'Image processing timed out. Please try again.',
+        retryable: true,
+      );
     } on SocketException {
-      throw ApiException(statusCode: 503, message: "Unable to connect to server. Check internet connection.");
+      throw ApiException(
+        statusCode: 503,
+        message: 'Unable to connect to server. Check your internet connection.',
+        retryable: true,
+      );
     } catch (e) {
-      if (e is ApiException || e is ScanLimitException) rethrow;
-      throw ApiException(statusCode: 500, message: "An error occurred while uploading image.");
+      if (e is ApiException ||
+          e is ScanLimitException ||
+          e is ScanInProgressException ||
+          e is AiQuotaTemporarilyExhaustedException) {
+        rethrow;
+      }
+
+      throw ApiException(
+        statusCode: 500,
+        message: 'An error occurred while uploading image.',
+      );
     }
   }
 
   dynamic _processResponse(http.Response response) {
     dynamic jsonBody;
+
     try {
       jsonBody = jsonDecode(response.body);
     } catch (_) {
       jsonBody = null;
     }
 
-    if (response.statusCode == 200) {
-      if (jsonBody is Map<String, dynamic> && jsonBody["success"] == true) {
-        return jsonBody["data"] ?? jsonBody;
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (jsonBody is Map<String, dynamic> && jsonBody['success'] == true) {
+        final data = jsonBody['data'];
+
+        // Preserve backend metadata such as remainingScans, dailyLimit,
+        // quota and usage. The previous implementation returned only `data`,
+        // which silently discarded those fields from successful scan replies.
+        if (data is Map<String, dynamic>) {
+          final merged = Map<String, dynamic>.from(data);
+
+          for (final key in const [
+            'scansToday',
+            'remainingScans',
+            'dailyLimit',
+            'usage',
+            'quota',
+            'resetAt',
+            'cached',
+          ]) {
+            if (jsonBody.containsKey(key)) {
+              merged[key] = jsonBody[key];
+            }
+          }
+
+          return merged;
+        }
+
+        return data ?? jsonBody;
       }
+
       return jsonBody;
     }
 
-    // Handle 429 Daily Limit Reached (Must take precedence over generic errors)
-    if (response.statusCode == 429 || (jsonBody is Map && jsonBody["error"] == "daily_limit_reached")) {
-      final usage = ScanUsage(
-        limit: jsonBody is Map ? (jsonBody["limit"] ?? 5) : 5,
-        used: jsonBody is Map ? (jsonBody["used"] ?? 5) : 5,
-        remaining: jsonBody is Map ? (jsonBody["remaining"] ?? 0) : 0,
-        resetAt: jsonBody is Map ? jsonBody["resetAt"] : null,
-      );
+    final body = jsonBody is Map<String, dynamic> ? jsonBody : <String, dynamic>{};
+    final errorCode = _readString(body['errorCode']) ??
+        _readString(body['code']) ??
+        _readString(body['error']);
+    final message = _readString(body['message']) ??
+        'Server error (${response.statusCode}).';
+
+    // Authoritative user limit: 4 scans/day.
+    if (response.statusCode == 429 &&
+        (errorCode == 'DAILY_SCAN_LIMIT_REACHED' ||
+            errorCode == 'daily_limit_reached')) {
+      final usage = ScanUsage.fromJson(body);
+
       throw ScanLimitException(
         scanUsage: usage,
-        message: jsonBody is Map
-            ? (jsonBody["message"] ?? "Daily scan limit reached (5/5). Scans reset at 12:00 AM.")
-            : "Daily scan limit reached.",
+        message: message,
+        code: errorCode ?? 'DAILY_SCAN_LIMIT_REACHED',
+        resetAt: usage.resetAt,
       );
     }
 
-    // Handle 401 Unauthorized (ONLY if 401 persists after ID token force-refresh)
+    // Prevent duplicate simultaneous scans from one user.
+    if (response.statusCode == 409 &&
+        errorCode == 'SCAN_ALREADY_IN_PROGRESS') {
+      throw const ScanInProgressException();
+    }
+
+    // Google/Gemini quota is different from the user's daily scan limit.
+    // The backend deliberately returns this as 503 so the Flutter app can
+    // display a temporary AI-service message without consuming another scan.
+    if (errorCode == 'AI_QUOTA_TEMPORARILY_EXHAUSTED') {
+      throw AiQuotaTemporarilyExhaustedException(
+        message: message,
+        retryable: body['retryable'] == true,
+      );
+    }
+
     if (response.statusCode == 401) {
       final user = _authService.currentUser;
+
       if (user == null) {
         _authService.logout();
         throw ApiException(
           statusCode: 401,
-          message: "Your session has expired. Please log in again.",
-        );
-      } else {
-        throw ApiException(
-          statusCode: 401,
-          message: jsonBody is Map ? (jsonBody["message"] ?? "Authentication error. Please try again.") : "Authentication error. Please try again.",
+          code: errorCode,
+          message: 'Your session has expired. Please log in again.',
         );
       }
+
+      throw ApiException(
+        statusCode: 401,
+        code: errorCode,
+        message: message,
+      );
     }
 
-    // Handle 400 Bad Request
     if (response.statusCode == 400) {
       throw ApiException(
         statusCode: 400,
-        message: jsonBody is Map ? (jsonBody["message"] ?? jsonBody["error"] ?? "Invalid request.") : "Invalid request.",
+        code: errorCode,
+        message: message,
       );
     }
 
-    // Handle 403 Forbidden
     if (response.statusCode == 403) {
       throw ApiException(
         statusCode: 403,
-        message: jsonBody is Map ? (jsonBody["message"] ?? "Access denied.") : "Access denied.",
+        code: errorCode,
+        message: message,
       );
     }
 
-    // Server / Gemini Errors (500, 502, 503)
-    final msg = (jsonBody is Map)
-        ? (jsonBody["message"] ?? jsonBody["error"] ?? "Server error (${response.statusCode})")
-        : "Server error (${response.statusCode})";
+    throw ApiException(
+      statusCode: response.statusCode,
+      code: errorCode,
+      message: message,
+      retryable: body['retryable'] == true,
+    );
+  }
 
-    throw ApiException(statusCode: response.statusCode, message: msg.toString());
+  String? _readString(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    return text.isEmpty ? null : text;
   }
 }
